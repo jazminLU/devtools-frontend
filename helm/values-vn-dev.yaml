@@ -1,0 +1,82 @@
+# Values para Frontend - ambiente VN-DEV
+# Este archivo se usa junto con el chart de ECR: oci://002419998824.dkr.ecr.us-east-1.amazonaws.com/helm-charts/devtools-playground
+# Cluster: vn-dev-eks
+
+# Frontend Configuration
+frontend:
+  enabled: true
+  image:
+    repository: 002419998824.dkr.ecr.us-east-1.amazonaws.com/devtools-frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 80
+  env:
+    VITE_API_URL: "/api"
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Backend - deshabilitado (se despliega desde su propio repo)
+backend:
+  enabled: false
+
+# PostgreSQL - deshabilitado (se maneja desde el repo del backend)
+postgresql:
+  enabled: false
+
+# Ingress Configuration
+# Usando AWS Load Balancer Controller (ALB)
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    # Configuración básica del ALB
+    alb.ingress.kubernetes.io/load-balancer-type: external
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    
+    # Health checks
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    
+    # Tags para el ALB
+    alb.ingress.kubernetes.io/tags: "Environment=dev,Project=vn,ManagedBy=Helm"
+    
+    # SSL/TLS Configuration
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:002419998824:certificate/e4c80219-c644-4613-b901-4a8a8ddf5771"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+  hosts:
+    - host: app.dryvn.org
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
