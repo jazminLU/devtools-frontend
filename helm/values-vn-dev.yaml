@@ -1,8 +1,4 @@
-# Values para Frontend - ambiente VN-DEV
-# Este archivo se usa junto con el chart de ECR: oci://558497223978.dkr.ecr.us-east-1.amazonaws.com/helm-charts/devtools-playground
-# Cluster: vn-dev-eks
 
-# Frontend Configuration
 frontend:
   enabled: true
   image:
