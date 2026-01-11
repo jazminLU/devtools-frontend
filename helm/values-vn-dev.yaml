@@ -65,7 +65,7 @@ ingress:
     alb.ingress.kubernetes.io/tags: "Environment=dev,Project=vn,ManagedBy=Helm"
     
     # SSL/TLS Configuration
-    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:002419998824:certificate/e4c80219-c644-4613-b901-4a8a8ddf5771"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:558497223978:certificate/13491f89-d778-4aef-a41c-c798a074144e"
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
     alb.ingress.kubernetes.io/ssl-redirect: "443"
