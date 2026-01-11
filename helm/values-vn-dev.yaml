@@ -62,7 +62,7 @@ ingress:
     alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
     
     # Tags para el ALB
-    alb.ingress.kubernetes.io/tags: "Environment=dev,Project=vn,ManagedBy=Helm"
+    alb.ingress.kubernetes.io/tags: "Environment=dev,Project=moon,ManagedBy=Helm"
     
     # SSL/TLS Configuration
     alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:558497223978:certificate/13491f89-d778-4aef-a41c-c798a074144e"
