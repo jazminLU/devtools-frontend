@@ -70,7 +70,7 @@ ingress:
     alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
     alb.ingress.kubernetes.io/ssl-redirect: "443"
   hosts:
-    - host: app.dryvn.org
+    - host: app.infra-moon.com
       paths:
         - path: /
           pathType: Prefix
