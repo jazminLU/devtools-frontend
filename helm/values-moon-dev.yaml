@@ -1,0 +1,70 @@
+frontend:
+  enabled: true
+  image:
+    repository: 558497223978.dkr.ecr.us-east-1.amazonaws.com/moon-frontend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  service:
+    type: ClusterIP
+    port: 80
+  env:
+    VITE_API_URL: "/api"
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 80
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+backend:
+  enabled: false
+
+postgresql:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+   
+    alb.ingress.kubernetes.io/load-balancer-type: external
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "30"
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: "3"
+    
+    alb.ingress.kubernetes.io/tags: "Environment=dev,Project=moon,ManagedBy=Helm"
+    
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:us-east-1:558497223978:certificate/13491f89-d778-4aef-a41c-c798a074144e"
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+  hosts:
+    - host: app.infra-moon.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
