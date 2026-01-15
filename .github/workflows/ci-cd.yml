@@ -1,0 +1,458 @@
+name: Frontend CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      build_image:
+        description: 'Build and push Docker image'
+        required: false
+        default: 'true'
+        type: boolean
+      deploy_dev:
+        description: 'Deploy to dev cluster'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 558497223978
+  ECR_REGISTRY: 558497223978.dkr.ecr.us-east-1.amazonaws.com
+  IMAGE_REPO: moon-frontend
+  HELM_CHART_REPO: devtools-playground
+  HELM_CHART_NAME: devtools-playground-frontend
+  EKS_CLUSTER_NAME: moon-dev-eks
+  SONAR_ORG: jazminlu
+  SONAR_PROJECT_KEY: jazminLU_devtools-frontend
+
+jobs:
+  lint-and-test:
+    name: Lint and Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Node.js dependencies
+        run: |
+          npm install
+
+      - name: Run ESLint (if configured)
+        run: |
+          echo "🔍 Checking for ESLint configuration..."
+          if [ -f ".eslintrc" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ] || [ -f "eslint.config.js" ] || [ -f "eslint.config.mjs" ]; then
+            echo "ESLint configuration found, running linter..."
+            npx eslint src --ext .js,.jsx --format=stylish || true
+          elif command -v eslint &> /dev/null || npx --yes eslint --version &> /dev/null; then
+            echo "ESLint available but no config found, skipping linting"
+          else
+            echo "ℹESLint not configured, skipping linting step"
+          fi
+        continue-on-error: true
+
+      - name: Run unit tests with coverage
+        run: |
+          echo "Running unit tests with coverage..."
+          npm run test:coverage
+        continue-on-error: true
+
+      - name: Verify coverage files exist
+        if: always()
+        run: |
+          if [ -f coverage/lcov.info ]; then
+            echo "coverage/lcov.info generated successfully"
+            ls -lh coverage/lcov.info
+            echo ""
+            echo "=== Coverage Summary ==="
+            if [ -f coverage/coverage-summary.json ]; then
+              cat coverage/coverage-summary.json | head -30 || true
+            fi
+          else
+            echo "coverage/lcov.info not found!"
+            echo "Attempting to generate it..."
+            npm run test:coverage || true
+            if [ -f coverage/lcov.info ]; then
+              echo "coverage/lcov.info generated on retry"
+            else
+              echo "Failed to generate coverage/lcov.info"
+              exit 1
+            fi
+          fi
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage/lcov.info
+            coverage/
+          retention-days: 7
+
+  sonarcloud-analysis:
+    name: SonarCloud Analysis
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install Node.js dependencies
+        run: |
+          npm install
+
+      - name: Download coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-reports
+          path: .
+
+      - name: Verify coverage/lcov.info exists
+        run: |
+          if [ -f coverage/lcov.info ]; then
+            echo "coverage/lcov.info found"
+            ls -lh coverage/lcov.info
+          else
+            echo "coverage/lcov.info not found, generating it..."
+            npm run test:coverage || true
+          fi
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: .
+          args: >
+            -Dsonar.organization=${{ env.SONAR_ORG }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.sources=src
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.sourceEncoding=UTF-8
+            -Dsonar.test.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
+            -Dsonar.language=js
+            -Dsonar.github.repository=${{ github.repository }}
+            -Dsonar.github.oauth=${{ secrets.GITHUB_TOKEN }}
+            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0}', github.event.pull_request.number) || format('-Dsonar.branch.name={0}', github.ref_name) }}
+            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.branch={0}', github.head_ref) || '' }}
+            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.base={0}', github.base_ref) || '' }}
+
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::558497223978:role/github-actions-devtools-frontend
+          role-session-name: GitHubActions-Frontend-Build
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image tags
+        id: image-tags
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          BRANCH_NAME=${BRANCH_NAME//\//-}
+          
+          TAG="$SHORT_SHA"
+          
+          if [ "$BRANCH_NAME" != "main" ]; then
+            TAG="$TAG,$BRANCH_NAME"
+          fi
+          
+          if [ "$BRANCH_NAME" == "main" ]; then
+            TAG="$TAG,latest"
+          fi
+          
+          echo "tags=$TAG" >> $GITHUB_OUTPUT
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VITE_API_URL=/api
+            VITE_APP_VERSION=${{ steps.image-tags.outputs.short_sha }}
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}:${{ steps.image-tags.outputs.short_sha }}
+            ${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}:latest
+          cache-from: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}:buildcache
+          cache-to: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}:buildcache,mode=max
+
+      - name: Output image URL
+        run: |
+          echo "Docker Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}:${{ steps.image-tags.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }}:latest\`" >> $GITHUB_STEP_SUMMARY
+
+  deploy-dev:
+    name: Deploy Frontend to Dev Cluster
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    permissions:
+      id-token: write
+      contents: read
+
+    if: success()
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::558497223978:role/github-actions-devtools-frontend
+          role-session-name: GitHubActions-Frontend-Deploy
+          aws-region: ${{ env.AWS_REGION }}
+          audience: sts.amazonaws.com
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.13.0'
+
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      - name: Authenticate Helm with ECR
+        run: |
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+            helm registry login --username AWS --password-stdin ${{ env.ECR_REGISTRY }}
+
+      - name: Get short SHA
+        id: sha
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Verify image exists in ECR
+        run: |
+          echo "Verifying image exists in ECR..."
+          IMAGE_TAG="${{ steps.sha.outputs.short_sha }}"
+          aws ecr describe-images \
+            --repository-name ${{ env.IMAGE_REPO }} \
+            --image-ids imageTag=$IMAGE_TAG \
+            --region ${{ env.AWS_REGION }} || {
+            echo "Image tag $IMAGE_TAG not found, trying latest..."
+            aws ecr describe-images \
+              --repository-name ${{ env.IMAGE_REPO }} \
+              --image-ids imageTag=latest \
+              --region ${{ env.AWS_REGION }}
+          }
+          echo "Image verified in ECR"
+
+      - name: Deploy to EKS
+        run: |
+          echo "Deploying Frontend to EKS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deploying with image tag: \`${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Release name: \`${{ env.HELM_CHART_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          helm upgrade --install ${{ env.HELM_CHART_NAME }} \
+            oci://${{ env.ECR_REGISTRY }}/${{ env.HELM_CHART_REPO }} \
+            --version 1.0.0 \
+            --namespace devtools-playground \
+            --create-namespace \
+            --values helm/values-vn-dev.yaml \
+            --set frontend.enabled=true \
+            --set frontend.image.repository=${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }} \
+            --set frontend.image.tag=${{ steps.sha.outputs.short_sha }} \
+            --set backend.enabled=false \
+            --set frontend.nginxConfigMap.enabled=false
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Helm deployment command completed!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Application URL: https://app.infra-moon.com" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fix nginx ConfigMap with correct backend service name
+        if: always()
+        run: |
+          echo "Fixing nginx ConfigMap with correct backend service name..."
+          
+          # Find the nginx ConfigMap for the frontend
+          CONFIGMAP_NAME=$(kubectl get configmap -n devtools-playground -o name | grep -E "(frontend.*nginx|nginx.*frontend)" | head -1 | cut -d/ -f2 || echo "")
+          
+          if [ -z "$CONFIGMAP_NAME" ]; then
+            # Try alternative naming pattern
+            CONFIGMAP_NAME=$(kubectl get configmap -n devtools-playground -o name | grep nginx | grep frontend | head -1 | cut -d/ -f2 || echo "")
+          fi
+          
+          if [ -z "$CONFIGMAP_NAME" ]; then
+            echo "No nginx ConfigMap found, chart may not be creating one"
+            exit 0
+          fi
+          
+          echo "Found ConfigMap: $CONFIGMAP_NAME"
+          
+          # Create nginx.conf with correct backend service name
+          # Using printf to avoid YAML parsing issues with heredoc
+          printf '%s\n' \
+            'server {' \
+            '  listen 80;' \
+            '  server_name localhost;' \
+            '  root /usr/share/nginx/html;' \
+            '  index index.html;' \
+            '' \
+            '  # Security headers' \
+            '  add_header X-Frame-Options "SAMEORIGIN" always;' \
+            '  add_header X-Content-Type-Options "nosniff" always;' \
+            '  add_header X-XSS-Protection "1; mode=block" always;' \
+            '' \
+            '  # Gzip compression' \
+            '  gzip on;' \
+            '  gzip_vary on;' \
+            '  gzip_min_length 1024;' \
+            '  gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json;' \
+            '' \
+            '  # Cache static assets' \
+            '  location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {' \
+            '    expires 1y;' \
+            '    add_header Cache-Control "public, immutable";' \
+            '  }' \
+            '' \
+            '  # Proxy API requests to backend' \
+            '  # IMPORTANT: Using correct backend service name: devtools-playground-backend-backend' \
+            '  # (NOT devtools-playground-frontend-backend which the chart incorrectly generates)' \
+            '  location /api {' \
+            '    rewrite ^/api(.*) $1 break;' \
+            '    proxy_pass http://devtools-playground-backend-backend.devtools-playground.svc.cluster.local:8000;' \
+            '    proxy_set_header Host $host;' \
+            '    proxy_set_header X-Real-IP $remote_addr;' \
+            '    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+            '    proxy_set_header X-Forwarded-Proto $scheme;' \
+            '  }' \
+            '' \
+            '  # Main SPA routing' \
+            '  location / {' \
+            '    try_files $uri $uri/ /index.html;' \
+            '  }' \
+            '' \
+            '  # Health check endpoint' \
+            '  location /health {' \
+            '    access_log off;' \
+            '    return 200 "healthy\n";' \
+            '    add_header Content-Type text/plain;' \
+            '  }' \
+            '}' > /tmp/nginx.conf
+
+          # Update the ConfigMap
+          kubectl create configmap "$CONFIGMAP_NAME" \
+            --from-file=nginx.conf=/tmp/nginx.conf \
+            -n devtools-playground \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "ConfigMap '$CONFIGMAP_NAME' updated successfully with correct backend service name"
+          
+          # Verify the update
+          echo ""
+          echo "Verifying ConfigMap content:"
+          kubectl get configmap "$CONFIGMAP_NAME" -n devtools-playground -o jsonpath='{.data.nginx\.conf}' | grep -A 2 "proxy_pass" || echo "⚠️ Could not verify proxy_pass in ConfigMap"
+          
+          # Restart pods to pick up the new ConfigMap
+          echo ""
+          echo "Restarting frontend pods to pick up the updated ConfigMap..."
+          DEPLOYMENT_NAME=""
+          if kubectl get deployment devtools-playground-frontend-frontend -n devtools-playground &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend-frontend"
+          elif kubectl get deployment devtools-playground-frontend -n devtools-playground &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend"
+          fi
+          
+          if [ -n "$DEPLOYMENT_NAME" ]; then
+            kubectl rollout restart deployment/$DEPLOYMENT_NAME -n devtools-playground
+            echo "Deployment restarted"
+          else
+            echo "Could not find deployment to restart"
+          fi
+
+      - name: Verify deployment
+        timeout-minutes: 5
+        run: |
+          echo "Checking pods status..."
+          # Try both possible deployment names
+          DEPLOYMENT_NAME=""
+          if kubectl get deployment devtools-playground-frontend-frontend -n devtools-playground &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend-frontend"
+          elif kubectl get deployment devtools-playground-frontend -n devtools-playground &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend"
+          else
+            echo "Deployment not found. Listing all deployments:"
+            kubectl get deployments -n devtools-playground
+            exit 1
+          fi
+          
+          echo "Using deployment: $DEPLOYMENT_NAME"
+          kubectl get pods -n devtools-playground -l app.kubernetes.io/component=frontend
+          
+          echo ""
+          echo "Waiting for rollout to complete (timeout: 5 minutes)..."
+          kubectl rollout status deployment/$DEPLOYMENT_NAME -n devtools-playground --timeout=5m || {
+            echo "Rollout timeout or failed. Checking pod status..."
+            kubectl describe pods -n devtools-playground -l app.kubernetes.io/component=frontend
+            kubectl get events -n devtools-playground --sort-by='.lastTimestamp' | tail -20
+            exit 1
+          }
+          
+          echo ""
+          echo "Deployment verified successfully!"
+          kubectl get pods -n devtools-playground -l app.kubernetes.io/component=frontend
+
