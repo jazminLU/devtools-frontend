@@ -311,7 +311,7 @@ jobs:
             --version 1.0.0 \
             --namespace devtools-playground \
             --create-namespace \
-            --values helm/values-vn-dev.yaml \
+            --values helm/values-moon-dev.yaml \
             --set frontend.enabled=true \
             --set frontend.image.repository=${{ env.ECR_REGISTRY }}/${{ env.IMAGE_REPO }} \
             --set frontend.image.tag=${{ steps.sha.outputs.short_sha }} \
