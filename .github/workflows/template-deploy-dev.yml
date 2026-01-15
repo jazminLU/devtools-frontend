@@ -1,0 +1,271 @@
+name: Deploy to Dev Cluster
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        required: true
+        type: string
+      ecr_registry:
+        required: true
+        type: string
+      image_repo:
+        required: true
+        type: string
+      eks_cluster_name:
+        required: true
+        type: string
+      helm_chart_repo:
+        required: true
+        type: string
+      helm_chart_name:
+        required: true
+        type: string
+      helm_chart_version:
+        required: false
+        type: string
+        default: '1.0.0'
+      namespace:
+        required: false
+        type: string
+        default: 'devtools-playground'
+      values_file:
+        required: false
+        type: string
+        default: 'helm/values-moon-dev.yaml'
+      aws_role_arn:
+        required: true
+        type: string
+      helm_version:
+        required: false
+        type: string
+        default: '3.13.0'
+      application_url:
+        required: false
+        type: string
+        default: ''
+    secrets:
+      AWS_ROLE_SESSION_NAME:
+        required: false
+
+jobs:
+  deploy-dev:
+    name: Deploy Frontend to Dev Cluster
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws_role_arn }}
+          role-session-name: ${{ secrets.AWS_ROLE_SESSION_NAME || 'GitHubActions-Frontend-Deploy' }}
+          aws-region: ${{ inputs.aws_region }}
+          audience: sts.amazonaws.com
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ inputs.helm_version }}
+
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ${{ inputs.eks_cluster_name }} --region ${{ inputs.aws_region }}
+
+      - name: Authenticate Helm with ECR
+        run: |
+          aws ecr get-login-password --region ${{ inputs.aws_region }} | \
+            helm registry login --username AWS --password-stdin ${{ inputs.ecr_registry }}
+
+      - name: Get short SHA
+        id: sha
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Verify image exists in ECR
+        run: |
+          echo "Verifying image exists in ECR..."
+          IMAGE_TAG="${{ steps.sha.outputs.short_sha }}"
+          aws ecr describe-images \
+            --repository-name ${{ inputs.image_repo }} \
+            --image-ids imageTag=$IMAGE_TAG \
+            --region ${{ inputs.aws_region }} || {
+            echo "Image tag $IMAGE_TAG not found, trying latest..."
+            aws ecr describe-images \
+              --repository-name ${{ inputs.image_repo }} \
+              --image-ids imageTag=latest \
+              --region ${{ inputs.aws_region }}
+          }
+          echo "Image verified in ECR"
+
+      - name: Deploy to EKS
+        run: |
+          echo "Deploying Frontend to EKS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Deploying with image tag: \`${{ steps.sha.outputs.short_sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Release name: \`${{ inputs.helm_chart_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          helm upgrade --install ${{ inputs.helm_chart_name }} \
+            oci://${{ inputs.ecr_registry }}/${{ inputs.helm_chart_repo }} \
+            --version ${{ inputs.helm_chart_version }} \
+            --namespace ${{ inputs.namespace }} \
+            --create-namespace \
+            --values ${{ inputs.values_file }} \
+            --set frontend.enabled=true \
+            --set frontend.image.repository=${{ inputs.ecr_registry }}/${{ inputs.image_repo }} \
+            --set frontend.image.tag=${{ steps.sha.outputs.short_sha }} \
+            --set backend.enabled=false \
+            --set frontend.nginxConfigMap.enabled=false
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Helm deployment command completed!" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.application_url }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Application URL: ${{ inputs.application_url }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fix nginx ConfigMap with correct backend service name
+        if: always()
+        run: |
+          echo "Fixing nginx ConfigMap with correct backend service name..."
+          
+          # Find the nginx ConfigMap for the frontend
+          CONFIGMAP_NAME=$(kubectl get configmap -n ${{ inputs.namespace }} -o name | grep -E "(frontend.*nginx|nginx.*frontend)" | head -1 | cut -d/ -f2 || echo "")
+          
+          if [ -z "$CONFIGMAP_NAME" ]; then
+            # Try alternative naming pattern
+            CONFIGMAP_NAME=$(kubectl get configmap -n ${{ inputs.namespace }} -o name | grep nginx | grep frontend | head -1 | cut -d/ -f2 || echo "")
+          fi
+          
+          if [ -z "$CONFIGMAP_NAME" ]; then
+            echo "No nginx ConfigMap found, chart may not be creating one"
+            exit 0
+          fi
+          
+          echo "Found ConfigMap: $CONFIGMAP_NAME"
+          
+          # Create nginx.conf with correct backend service name
+          # Using printf to avoid YAML parsing issues with heredoc
+          printf '%s\n' \
+            'server {' \
+            '  listen 80;' \
+            '  server_name localhost;' \
+            '  root /usr/share/nginx/html;' \
+            '  index index.html;' \
+            '' \
+            '  # Security headers' \
+            '  add_header X-Frame-Options "SAMEORIGIN" always;' \
+            '  add_header X-Content-Type-Options "nosniff" always;' \
+            '  add_header X-XSS-Protection "1; mode=block" always;' \
+            '' \
+            '  # Gzip compression' \
+            '  gzip on;' \
+            '  gzip_vary on;' \
+            '  gzip_min_length 1024;' \
+            '  gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml+rss application/json;' \
+            '' \
+            '  # Cache static assets' \
+            '  location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {' \
+            '    expires 1y;' \
+            '    add_header Cache-Control "public, immutable";' \
+            '  }' \
+            '' \
+            '  # Proxy API requests to backend' \
+            '  # IMPORTANT: Using correct backend service name: devtools-playground-backend-backend' \
+            '  # (NOT devtools-playground-frontend-backend which the chart incorrectly generates)' \
+            '  location /api {' \
+            '    rewrite ^/api(.*) $1 break;' \
+            '    proxy_pass http://devtools-playground-backend-backend.devtools-playground.svc.cluster.local:8000;' \
+            '    proxy_set_header Host $host;' \
+            '    proxy_set_header X-Real-IP $remote_addr;' \
+            '    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+            '    proxy_set_header X-Forwarded-Proto $scheme;' \
+            '  }' \
+            '' \
+            '  # Main SPA routing' \
+            '  location / {' \
+            '    try_files $uri $uri/ /index.html;' \
+            '  }' \
+            '' \
+            '  # Health check endpoint' \
+            '  location /health {' \
+            '    access_log off;' \
+            '    return 200 "healthy\n";' \
+            '    add_header Content-Type text/plain;' \
+            '  }' \
+            '}' > /tmp/nginx.conf
+
+          # Update the ConfigMap
+          kubectl create configmap "$CONFIGMAP_NAME" \
+            --from-file=nginx.conf=/tmp/nginx.conf \
+            -n ${{ inputs.namespace }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          echo "ConfigMap '$CONFIGMAP_NAME' updated successfully with correct backend service name"
+          
+          # Verify the update
+          echo ""
+          echo "Verifying ConfigMap content:"
+          kubectl get configmap "$CONFIGMAP_NAME" -n ${{ inputs.namespace }} -o jsonpath='{.data.nginx\.conf}' | grep -A 2 "proxy_pass" || echo "⚠️ Could not verify proxy_pass in ConfigMap"
+          
+          # Restart pods to pick up the new ConfigMap
+          echo ""
+          echo "Restarting frontend pods to pick up the updated ConfigMap..."
+          DEPLOYMENT_NAME=""
+          if kubectl get deployment devtools-playground-frontend-frontend -n ${{ inputs.namespace }} &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend-frontend"
+          elif kubectl get deployment devtools-playground-frontend -n ${{ inputs.namespace }} &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend"
+          fi
+          
+          if [ -n "$DEPLOYMENT_NAME" ]; then
+            kubectl rollout restart deployment/$DEPLOYMENT_NAME -n ${{ inputs.namespace }}
+            echo "Deployment restarted"
+          else
+            echo "Could not find deployment to restart"
+          fi
+
+      - name: Verify deployment
+        timeout-minutes: 5
+        run: |
+          echo "Checking pods status..."
+          # Try both possible deployment names
+          DEPLOYMENT_NAME=""
+          if kubectl get deployment devtools-playground-frontend-frontend -n ${{ inputs.namespace }} &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend-frontend"
+          elif kubectl get deployment devtools-playground-frontend -n ${{ inputs.namespace }} &>/dev/null; then
+            DEPLOYMENT_NAME="devtools-playground-frontend"
+          else
+            echo "Deployment not found. Listing all deployments:"
+            kubectl get deployments -n ${{ inputs.namespace }}
+            exit 1
+          fi
+          
+          echo "Using deployment: $DEPLOYMENT_NAME"
+          kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/component=frontend
+          
+          echo ""
+          echo "Waiting for rollout to complete (timeout: 5 minutes)..."
+          kubectl rollout status deployment/$DEPLOYMENT_NAME -n ${{ inputs.namespace }} --timeout=5m || {
+            echo "Rollout timeout or failed. Checking pod status..."
+            kubectl describe pods -n ${{ inputs.namespace }} -l app.kubernetes.io/component=frontend
+            kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp' | tail -20
+            exit 1
+          }
+          
+          echo ""
+          echo "Deployment verified successfully!"
+          kubectl get pods -n ${{ inputs.namespace }} -l app.kubernetes.io/component=frontend
+

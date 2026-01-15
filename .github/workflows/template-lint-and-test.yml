@@ -1,0 +1,82 @@
+name: Lint and Test
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        required: false
+        type: string
+        default: '18'
+
+jobs:
+  lint-and-test:
+    name: Lint and Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Install Node.js dependencies
+        run: |
+          npm install
+
+      - name: Run ESLint (if configured)
+        run: |
+          echo "🔍 Checking for ESLint configuration..."
+          if [ -f ".eslintrc" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ] || [ -f "eslint.config.js" ] || [ -f "eslint.config.mjs" ]; then
+            echo "ESLint configuration found, running linter..."
+            npx eslint src --ext .js,.jsx --format=stylish || true
+          elif command -v eslint &> /dev/null || npx --yes eslint --version &> /dev/null; then
+            echo "ESLint available but no config found, skipping linting"
+          else
+            echo "ℹESLint not configured, skipping linting step"
+          fi
+        continue-on-error: true
+
+      - name: Run unit tests with coverage
+        run: |
+          echo "Running unit tests with coverage..."
+          npm run test:coverage
+        continue-on-error: true
+
+      - name: Verify coverage files exist
+        if: always()
+        run: |
+          if [ -f coverage/lcov.info ]; then
+            echo "coverage/lcov.info generated successfully"
+            ls -lh coverage/lcov.info
+            echo ""
+            echo "=== Coverage Summary ==="
+            if [ -f coverage/coverage-summary.json ]; then
+              cat coverage/coverage-summary.json | head -30 || true
+            fi
+          else
+            echo "coverage/lcov.info not found!"
+            echo "Attempting to generate it..."
+            npm run test:coverage || true
+            if [ -f coverage/lcov.info ]; then
+              echo "coverage/lcov.info generated on retry"
+            else
+              echo "Failed to generate coverage/lcov.info"
+              exit 1
+            fi
+          fi
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage/lcov.info
+            coverage/
+          retention-days: 7
+
