@@ -13,7 +13,8 @@ function WordConcatForm({ words, onWordsChange, onSubmit, loading }) {
       <h2 className="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Word Concatenation Tool</h2>
       <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
         Concatenates the n-th letter of each word, where n is the index of the word (0-based).
-        For example: ["hello", "world"] → "hw" (h from index 0, w from index 1).
+        For example: ["hello", "world"] → "ho" (h from position 0 of "hello", o from position 1 of "world").
+        Another example: ["hello", "world", "test"] → "hos".
       </p>
       <form onSubmit={onSubmit} className="space-y-4">
         <FormTextarea

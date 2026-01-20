@@ -28,3 +28,7 @@ coverage
 *.sln
 *.sw?
 
+# Docker files for local development (not for cluster)
+Dockerfile.docker
+nginx.docker.conf
+

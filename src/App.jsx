@@ -12,9 +12,9 @@ import { useTheme } from './hooks/useTheme'
 import ThemeToggle from './components/ThemeToggle'
 import TabNavigation from './components/TabNavigation'
 
-// Use /api proxy in production (Docker), or direct URL in development
-const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.PROD ? '/api' : 'http://localhost:8000')
+// Use /api proxy (configured in vite.config.js for dev, nginx.conf for prod)
+// Or use VITE_API_URL env var for custom backend URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
 const TABS = {
   DICTIONARY: 'dictionary',
@@ -60,6 +60,14 @@ function App() {
           {activeTab === TABS.WORDS && <WordsTool apiUrl={API_BASE_URL} />}
         </div>
       </main>
+
+      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <p className="text-center text-sm text-gray-600 dark:text-gray-400">
+            Created by Jazmin Luna © 2026
+          </p>
+        </div>
+      </footer>
     </div>
   )
 }

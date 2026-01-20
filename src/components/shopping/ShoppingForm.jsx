@@ -16,16 +16,18 @@ function ShoppingForm({ costs, items, tax, onCostsChange, onItemsChange, onTaxCh
         <div>
           <FormTextarea
             id="costs"
-            label="Item Costs (JSON or key:value format)"
+            label="Item Costs"
             value={costs}
             onChange={(e) => onCostsChange(e.target.value)}
             rows={5}
-            placeholder='{"apple": 1.50, "banana": 0.75, "orange": 2.00}'
+            placeholder="apple: 1.50
+banana: 0.75
+orange: 2.00"
             className="font-mono text-sm"
             required
           />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Format: JSON object or one item per line as "item: price"
+            Format: One item per line as "item: price"
           </p>
         </div>
         <FormTextarea
