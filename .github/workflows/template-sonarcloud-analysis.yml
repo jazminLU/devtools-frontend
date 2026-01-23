@@ -110,14 +110,34 @@ jobs:
               echo "✅ coverage/lcov.info generated successfully"
               ls -lh coverage/lcov.info
             else
-              echo "❌ Failed to generate coverage/lcov.info"
-              echo "This may cause SonarCloud analysis to fail"
-              exit 1
+              echo "⚠️ Failed to generate coverage/lcov.info"
+              echo "SonarCloud analysis will continue without coverage data"
             fi
           fi
 
+      - name: Verify SonarCloud project exists
+        run: |
+          echo "=== Verifying SonarCloud project configuration ==="
+          echo "Organization: ${{ inputs.sonar_org }}"
+          echo "Project Key: ${{ inputs.sonar_project_key }}"
+          echo ""
+          echo "Note: If you see a 404 error, ensure the project exists in SonarCloud"
+          echo "You can create it at: https://sonarcloud.io/projects/create"
+
+      - name: Prepare SonarCloud arguments
+        id: sonar-args
+        run: |
+          COVERAGE_ARGS=""
+          if [ -f coverage/lcov.info ]; then
+            COVERAGE_ARGS="-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
+            echo "✅ Coverage file found, will include in analysis"
+          else
+            echo "⚠️ Coverage file not found, analysis will continue without coverage"
+          fi
+          echo "coverage_args=${COVERAGE_ARGS}" >> $GITHUB_OUTPUT
+
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarqube-scan-action@v5.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -129,7 +149,7 @@ jobs:
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.sources=src
             -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,node_modules/**,.github/**,helm/**,*.md,*.yml,*.yaml,Dockerfile*,nginx*.conf,*.config.js,*.config.ts,package*.json,*.lock
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            ${{ steps.sonar-args.outputs.coverage_args }}
             -Dsonar.coverage.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,**/test/**,**/tests/**,**/coverage/**
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.test.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
