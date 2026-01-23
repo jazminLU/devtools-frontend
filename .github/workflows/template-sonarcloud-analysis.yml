@@ -44,29 +44,65 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: coverage-reports
-          path: coverage/
+          path: .
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore coverage file structure
+        run: |
+          echo "=== Artifact structure after download ==="
+          find . -name "lcov.info" -type f 2>/dev/null || echo "No lcov.info found"
+          echo ""
+          if [ -d coverage-artifact ]; then
+            echo "Found coverage-artifact directory, moving files..."
+            if [ -f coverage-artifact/coverage/lcov.info ]; then
+              mkdir -p coverage
+              cp coverage-artifact/coverage/lcov.info coverage/lcov.info
+              echo "✅ Copied lcov.info to coverage/lcov.info"
+            fi
+          elif [ -f coverage/lcov.info ]; then
+            echo "✅ coverage/lcov.info already in correct location"
+          else
+            echo "⚠️ coverage/lcov.info not found in expected locations"
+          fi
 
       - name: Verify coverage files exist
         run: |
+          echo "=== Current directory structure ==="
+          pwd
+          ls -la
+          echo ""
+          echo "=== Checking for coverage files ==="
+          find . -name "lcov.info" -type f 2>/dev/null || echo "No lcov.info found"
+          echo ""
           echo "=== Checking coverage directory ==="
-          ls -la coverage/ || echo "coverage directory not found"
+          if [ -d coverage ]; then
+            echo "coverage directory exists"
+            ls -la coverage/ || echo "coverage directory is empty"
+          else
+            echo "coverage directory does not exist"
+          fi
           echo ""
           echo "=== Looking for lcov.info ==="
           if [ -f coverage/lcov.info ]; then
             echo "✅ coverage/lcov.info found"
             ls -lh coverage/lcov.info
             echo ""
-            echo "=== First 20 lines of lcov.info ==="
-            head -20 coverage/lcov.info || true
+            echo "=== File validation ==="
+            file coverage/lcov.info || true
             echo ""
-            echo "=== File size ==="
+            echo "=== First 30 lines of lcov.info ==="
+            head -30 coverage/lcov.info || true
+            echo ""
+            echo "=== File statistics ==="
             wc -l coverage/lcov.info || true
+            echo ""
+            echo "=== Checking for source files in lcov.info ==="
+            grep -c "^SF:" coverage/lcov.info || echo "No source files found in lcov.info"
           else
-            echo "❌ coverage/lcov.info not found!"
-            echo "Current directory: $(pwd)"
-            echo "Files in coverage/:"
-            ls -la coverage/ || echo "coverage directory does not exist"
+            echo "❌ coverage/lcov.info not found in expected location!"
+            echo ""
+            echo "Searching for lcov.info in entire workspace..."
+            find . -name "lcov.info" -type f 2>/dev/null | head -5
             echo ""
             echo "Attempting to generate coverage..."
             npm run test:coverage || true
@@ -75,6 +111,7 @@ jobs:
               ls -lh coverage/lcov.info
             else
               echo "❌ Failed to generate coverage/lcov.info"
+              echo "This may cause SonarCloud analysis to fail"
               exit 1
             fi
           fi
@@ -93,7 +130,7 @@ jobs:
             -Dsonar.sources=src
             -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,node_modules/**,.github/**,helm/**,*.md,*.yml,*.yaml,Dockerfile*,nginx*.conf,*.config.js,*.config.ts,package*.json,*.lock
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-            -Dsonar.coverage.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,**/test/**,**/tests/**
+            -Dsonar.coverage.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,**/test/**,**/tests/**,**/coverage/**
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.test.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
             -Dsonar.language=js

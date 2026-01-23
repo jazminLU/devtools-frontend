@@ -50,24 +50,56 @@ jobs:
       - name: Verify coverage files exist
         if: always()
         run: |
+          echo "=== Checking for coverage files ==="
+          echo "Current directory: $(pwd)"
+          echo ""
+          echo "=== Files in coverage/ directory ==="
+          ls -la coverage/ || echo "coverage directory does not exist"
+          echo ""
           if [ -f coverage/lcov.info ]; then
-            echo "coverage/lcov.info generated successfully"
+            echo "✅ coverage/lcov.info generated successfully"
             ls -lh coverage/lcov.info
+            echo ""
+            echo "=== File size and line count ==="
+            wc -l coverage/lcov.info || true
+            echo ""
+            echo "=== First 30 lines of lcov.info ==="
+            head -30 coverage/lcov.info || true
             echo ""
             echo "=== Coverage Summary ==="
             if [ -f coverage/coverage-summary.json ]; then
               cat coverage/coverage-summary.json | head -30 || true
             fi
           else
-            echo "coverage/lcov.info not found!"
+            echo "❌ coverage/lcov.info not found!"
             echo "Attempting to generate it..."
             npm run test:coverage || true
             if [ -f coverage/lcov.info ]; then
-              echo "coverage/lcov.info generated on retry"
+              echo "✅ coverage/lcov.info generated on retry"
+              ls -lh coverage/lcov.info
             else
-              echo "Failed to generate coverage/lcov.info"
+              echo "❌ Failed to generate coverage/lcov.info"
+              echo "Listing all files in project root:"
+              ls -la | head -20
               exit 1
             fi
+          fi
+
+      - name: Prepare coverage artifact
+        if: always()
+        run: |
+          if [ -f coverage/lcov.info ]; then
+            echo "✅ coverage/lcov.info exists, preparing artifact..."
+            mkdir -p coverage-artifact/coverage
+            cp coverage/lcov.info coverage-artifact/coverage/lcov.info
+            if [ -f coverage/coverage-summary.json ]; then
+              cp coverage/coverage-summary.json coverage-artifact/coverage/coverage-summary.json
+            fi
+            echo "Artifact structure:"
+            find coverage-artifact -type f
+          else
+            echo "❌ coverage/lcov.info not found, cannot create artifact"
+            exit 1
           fi
 
       - name: Upload coverage reports
@@ -75,8 +107,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-reports
-          path: |
-            coverage/lcov.info
-            coverage/
+          path: coverage-artifact/
           retention-days: 7
+          if-no-files-found: error
 
