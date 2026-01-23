@@ -4,10 +4,9 @@
  * Implements Single Responsibility Principle - handles only dictionary functionality.
  * Uses dependency injection for API service (Dependency Inversion).
  */
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import PropTypes from 'prop-types'
-import { createApiService } from '../services/apiService'
-import { useAsyncOperation } from '../hooks/useAsyncOperation'
+import { useTool } from '../hooks/useTool'
 import { isNotEmpty } from '../utils/validation'
 import { SUCCESS_MESSAGES } from '../utils/constants'
 import WordForm from './dictionary/WordForm'
@@ -19,10 +18,7 @@ function DictionaryTool({ apiUrl }) {
   const [word, setWord] = useState('')
   const [definition, setDefinition] = useState('')
   const [searchWord, setSearchWord] = useState('')
-  const [result, setResult] = useState(null)
-  
-  const apiService = useMemo(() => createApiService(apiUrl), [apiUrl])
-  const { loading, error, execute, resetError } = useAsyncOperation()
+  const { apiService, loading, error, execute, resetError, result, setResult } = useTool(apiUrl)
 
   const handleAddWord = async (e) => {
     e.preventDefault()

@@ -4,10 +4,9 @@
  * Implements Single Responsibility Principle - handles only word concatenation.
  * Uses dependency injection for API service (Dependency Inversion).
  */
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import PropTypes from 'prop-types'
-import { createApiService } from '../services/apiService'
-import { useAsyncOperation } from '../hooks/useAsyncOperation'
+import { useTool } from '../hooks/useTool'
 import { parseItems } from '../utils/parsers'
 import WordConcatForm from './words/WordConcatForm'
 import WordConcatResult from './words/WordConcatResult'
@@ -15,10 +14,7 @@ import ErrorCard from './common/ErrorCard'
 
 function WordsTool({ apiUrl }) {
   const [words, setWords] = useState('')
-  const [result, setResult] = useState(null)
-  
-  const apiService = useMemo(() => createApiService(apiUrl), [apiUrl])
-  const { loading, error, execute, resetError } = useAsyncOperation()
+  const { apiService, loading, error, execute, resetError, result, setResult } = useTool(apiUrl)
 
   const handleConcatenate = async (e) => {
     e.preventDefault()
