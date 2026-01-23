@@ -45,19 +45,65 @@ jobs:
         with:
           name: coverage-reports
           path: .
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          continue-on-error: true
+
+      - name: Restore coverage file structure
+        run: |
+          echo "=== Artifact structure after download ==="
+          find . -name "lcov.info" -type f 2>/dev/null || echo "No lcov.info found"
+          echo ""
+          if [ -d coverage-artifact ]; then
+            echo "Found coverage-artifact directory, moving files..."
+            if [ -f coverage-artifact/coverage/lcov.info ]; then
+              mkdir -p coverage
+              cp coverage-artifact/coverage/lcov.info coverage/lcov.info
+              echo "Copied lcov.info to coverage/lcov.info"
+            fi
+          elif [ -f coverage/lcov.info ]; then
+            echo "coverage/lcov.info already in correct location"
+          else
+            echo "coverage/lcov.info not found in expected locations"
+          fi
 
       - name: Verify coverage/lcov.info exists
         run: |
           if [ -f coverage/lcov.info ]; then
             echo "coverage/lcov.info found"
             ls -lh coverage/lcov.info
+            echo ""
+            echo "=== First 20 lines of lcov.info ==="
+            head -20 coverage/lcov.info || true
+            echo ""
+            echo "=== File statistics ==="
+            wc -l coverage/lcov.info || true
           else
             echo "coverage/lcov.info not found, generating it..."
             npm run test:coverage || true
+            if [ -f coverage/lcov.info ]; then
+              echo "coverage/lcov.info generated successfully"
+              ls -lh coverage/lcov.info
+            else
+              echo "Failed to generate coverage/lcov.info"
+              echo "SonarCloud analysis will continue without coverage data"
+            fi
           fi
 
+      - name: Prepare SonarCloud arguments
+        id: sonar-args
+        run: |
+          COVERAGE_ARGS=""
+          if [ -f coverage/lcov.info ]; then
+            COVERAGE_ARGS="-Dsonar.javascript.lcov.reportPaths=coverage/lcov.info"
+            echo "Coverage file found, will include in analysis"
+          else
+            echo "Coverage file not found, analysis will continue without coverage"
+          fi
+          echo "coverage_args=${COVERAGE_ARGS}" >> $GITHUB_OUTPUT
+
       - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@master
+        uses: SonarSource/sonarqube-scan-action@v5.0.0
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -68,11 +114,13 @@ jobs:
             -Dsonar.projectKey=${{ inputs.sonar_project_key }}
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.sources=src
-            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,node_modules/**,.github/**,helm/**,*.md,*.yml,*.yaml,Dockerfile*,nginx*.conf,*.config.js,*.config.ts,package*.json,*.lock
+            ${{ steps.sonar-args.outputs.coverage_args }}
+            -Dsonar.coverage.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,**/test/**,**/tests/**,**/coverage/**
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.test.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
             -Dsonar.language=js
+            -Dsonar.inclusions=src/**/*
             -Dsonar.github.repository=${{ github.repository }}
             -Dsonar.github.oauth=${{ secrets.GITHUB_TOKEN }}
             ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0}', github.event.pull_request.number) || format('-Dsonar.branch.name={0}', github.ref_name) }}

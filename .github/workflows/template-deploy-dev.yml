@@ -218,7 +218,7 @@ jobs:
           # Verify the update
           echo ""
           echo "Verifying ConfigMap content:"
-          kubectl get configmap "$CONFIGMAP_NAME" -n ${{ inputs.namespace }} -o jsonpath='{.data.nginx\.conf}' | grep -A 2 "proxy_pass" || echo "⚠️ Could not verify proxy_pass in ConfigMap"
+          kubectl get configmap "$CONFIGMAP_NAME" -n ${{ inputs.namespace }} -o jsonpath='{.data.nginx\.conf}' | grep -A 2 "proxy_pass" || echo "Could not verify proxy_pass in ConfigMap"
           
           # Restart pods to pick up the new ConfigMap
           echo ""

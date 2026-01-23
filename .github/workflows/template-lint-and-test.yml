@@ -30,14 +30,14 @@ jobs:
 
       - name: Run ESLint (if configured)
         run: |
-          echo "🔍 Checking for ESLint configuration..."
+          echo "Checking for ESLint configuration..."
           if [ -f ".eslintrc" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.json" ] || [ -f "eslint.config.js" ] || [ -f "eslint.config.mjs" ]; then
             echo "ESLint configuration found, running linter..."
             npx eslint src --ext .js,.jsx --format=stylish || true
           elif command -v eslint &> /dev/null || npx --yes eslint --version &> /dev/null; then
             echo "ESLint available but no config found, skipping linting"
           else
-            echo "ℹESLint not configured, skipping linting step"
+            echo "ESLint not configured, skipping linting step"
           fi
         continue-on-error: true
 
