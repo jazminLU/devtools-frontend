@@ -4,10 +4,9 @@
  * Implements Single Responsibility Principle - handles only shopping calculation.
  * Uses dependency injection for API service (Dependency Inversion).
  */
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import PropTypes from 'prop-types'
-import { createApiService } from '../services/apiService'
-import { useAsyncOperation } from '../hooks/useAsyncOperation'
+import { useTool } from '../hooks/useTool'
 import { parseCosts, parseItems } from '../utils/parsers'
 import { isPositive, isValidNumber } from '../utils/validation'
 import ShoppingForm from './shopping/ShoppingForm'
@@ -20,10 +19,7 @@ function ShoppingTool({ apiUrl }) {
   const [costs, setCosts] = useState('')
   const [items, setItems] = useState('')
   const [tax, setTax] = useState(DEFAULT_TAX)
-  const [result, setResult] = useState(null)
-  
-  const apiService = useMemo(() => createApiService(apiUrl), [apiUrl])
-  const { loading, error, execute, resetError } = useAsyncOperation()
+  const { apiService, loading, error, execute, resetError, result, setResult } = useTool(apiUrl)
 
   const handleCalculate = async (e) => {
     e.preventDefault()
