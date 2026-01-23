@@ -44,16 +44,39 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: coverage-reports
-          path: .
+          path: coverage/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify coverage/lcov.info exists
+      - name: Verify coverage files exist
         run: |
+          echo "=== Checking coverage directory ==="
+          ls -la coverage/ || echo "coverage directory not found"
+          echo ""
+          echo "=== Looking for lcov.info ==="
           if [ -f coverage/lcov.info ]; then
-            echo "coverage/lcov.info found"
+            echo "✅ coverage/lcov.info found"
             ls -lh coverage/lcov.info
+            echo ""
+            echo "=== First 20 lines of lcov.info ==="
+            head -20 coverage/lcov.info || true
+            echo ""
+            echo "=== File size ==="
+            wc -l coverage/lcov.info || true
           else
-            echo "coverage/lcov.info not found, generating it..."
+            echo "❌ coverage/lcov.info not found!"
+            echo "Current directory: $(pwd)"
+            echo "Files in coverage/:"
+            ls -la coverage/ || echo "coverage directory does not exist"
+            echo ""
+            echo "Attempting to generate coverage..."
             npm run test:coverage || true
+            if [ -f coverage/lcov.info ]; then
+              echo "✅ coverage/lcov.info generated successfully"
+              ls -lh coverage/lcov.info
+            else
+              echo "❌ Failed to generate coverage/lcov.info"
+              exit 1
+            fi
           fi
 
       - name: SonarCloud Scan
@@ -68,11 +91,13 @@ jobs:
             -Dsonar.projectKey=${{ inputs.sonar_project_key }}
             -Dsonar.host.url=https://sonarcloud.io
             -Dsonar.sources=src
-            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,node_modules/**,.github/**,helm/**,*.md,*.yml,*.yaml,Dockerfile*,nginx*.conf,*.config.js,*.config.ts,package*.json,*.lock
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx,**/test/**,**/tests/**
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.test.exclusions=**/*.test.js,**/*.test.jsx,**/*.spec.js,**/*.spec.jsx
             -Dsonar.language=js
+            -Dsonar.inclusions=src/**/*
             -Dsonar.github.repository=${{ github.repository }}
             -Dsonar.github.oauth=${{ secrets.GITHUB_TOKEN }}
             ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0}', github.event.pull_request.number) || format('-Dsonar.branch.name={0}', github.ref_name) }}
